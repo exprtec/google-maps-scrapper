@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gmbscraper"
+dynamic = ["version"]
+description = "Playwright-based scraper for Google Maps / Google Business Profile listings and reviews"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+    { name = "Abdul Hadi Bharara", email = "hadi@exprtec.com" },
+]
+keywords = ["google-maps", "gmb", "scraper", "playwright", "lead-generation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "playwright>=1.49.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/exprtec/gmbscraper-python"
+Repository = "https://github.com/exprtec/gmbscraper-python"
+Issues = "https://github.com/exprtec/gmbscraper-python/issues"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "pytest>=8.0",
+]
+
+[tool.hatch.version]
+path = "src/gmbscraper/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gmbscraper"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gmbscraper"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
