@@ -76,16 +76,6 @@ NAME_STOP_WORDS = LEGAL_NAME_TOKENS | {
     "supports",
     "the",
 }
-# Words a business name can gain or lose without becoming a different business:
-# legal suffixes, where it is registered, and joiners Google often drops.
-STRICT_NAME_IGNORED_TOKENS = LEGAL_NAME_TOKENS | {
-    "and",
-    "au",
-    "australia",
-    "australian",
-    "nz",
-    "the",
-}
 GENERIC_SEARCH_HEADINGS = frozenset({"results", "search results"})
 
 
@@ -200,17 +190,6 @@ def normalize_name(value: Any) -> str:
         token
         for token in re.findall(r"[a-z0-9]+", normalize_text(value).lower().replace("&", " and "))
         if token not in NAME_STOP_WORDS
-    ]
-    return " ".join(tokens)
-
-
-def normalize_strict_name(value: Any) -> str:
-    """Keep every distinctive word, in order, so names that merely share generic
-    words ("Connect Care Australia" vs "Care Connect") stay different."""
-    tokens = [
-        token
-        for token in re.findall(r"[a-z0-9]+", normalize_text(value).lower())
-        if token not in STRICT_NAME_IGNORED_TOKENS
     ]
     return " ".join(tokens)
 
