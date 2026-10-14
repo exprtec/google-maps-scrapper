@@ -9,6 +9,7 @@ from gmbscraper._page import (
     evaluate_json,
     is_limited_maps_view,
     navigate_to_place,
+    open_page,
     scroll_reviews_pane,
     set_reviews_sort,
 )
@@ -250,7 +251,7 @@ def scrape_reviews(
     if page is not None:
         return scrape_reviews_on_page(page, maps_url, max_reviews=max_reviews)
     if context is not None:
-        owned_page = context.new_page()
+        owned_page = open_page(context)
         try:
             return scrape_reviews_on_page(owned_page, maps_url, max_reviews=max_reviews)
         finally:

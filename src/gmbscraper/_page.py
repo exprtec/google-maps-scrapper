@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import re
+import time
 from typing import Any
 from urllib.parse import quote
+
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from gmbscraper.parsing import (
     extract_lat_lng,
@@ -18,6 +21,17 @@ LIMITED_VIEW_PHRASES = (
     "eingeschränkte ansicht",
     "vista limitada",
     "vista limitata",
+)
+
+# Map tiles, photos and fonts are most of Chromium's CPU; scraping only reads text.
+BLOCKED_URLS = (
+    "*/maps/vt*",
+    "*/vt/icon*",
+    "*fonts.gstatic.com/*",
+    "*googleusercontent.com/*",
+    "*streetviewpixels-pa.googleapis.com/*",
+    "*maps.gstatic.com/*",
+    "*/images/branding/*",
 )
 
 REVIEW_TAB_WORDS = frozenset(
@@ -70,6 +84,28 @@ REVIEWS_TAB_SELECTORS = (
     'button[role="tab"]',
     'div[role="tab"]',
 )
+
+
+def open_page(context: Any) -> Any:
+    """Open a Chromium page that skips downloading map tiles, photos and fonts."""
+    page = context.new_page()
+    session = context.new_cdp_session(page)
+    session.send("Network.enable")
+    session.send("Network.setBlockedURLs", {"urls": list(BLOCKED_URLS)})
+    return page
+
+
+def wait_for_content(page: Any, selectors: tuple[str, ...], *, max_wait_ms: int) -> None:
+    """Wait until each selector renders, sharing one `max_wait_ms` budget across them all."""
+    deadline = time.monotonic() + max_wait_ms / 1000
+    for selector in selectors:
+        remaining_ms = (deadline - time.monotonic()) * 1000
+        if remaining_ms <= 0:
+            return
+        try:
+            page.wait_for_selector(selector, timeout=remaining_ms)
+        except PlaywrightTimeoutError:
+            return
 
 
 def accept_consent(page: Any) -> None:

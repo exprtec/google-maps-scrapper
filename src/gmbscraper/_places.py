@@ -11,9 +11,11 @@ from gmbscraper._page import (
     accept_consent,
     first_attr,
     first_text,
+    open_page,
     read_aggregate_review_count,
     resolve_maps_place_url,
     scroll_search_results,
+    wait_for_content,
 )
 from gmbscraper.models import BusinessIdentity, OutletIdentity, PlaceProfile
 from gmbscraper.parsing import (
@@ -25,6 +27,10 @@ from gmbscraper.parsing import (
 )
 
 UNLIMITED_SEARCH_SCROLL_LIMIT = 1000
+# Upper bound on waiting for a page's content to render after navigation.
+CONTENT_MAX_WAIT_MS = 5000
+SEARCH_CONTENT_SELECTORS = ('div[role="feed"], h1.DUwDvf',)
+PLACE_CONTENT_SELECTORS = ("h1.DUwDvf", "[data-item-id]")
 
 COLLECT_PLACE_LINKS_JS = """() => {
     const feed = document.querySelector('div[role="feed"]');
@@ -63,14 +69,14 @@ def open_search(page: Any, query: str) -> None:
     url = f"https://www.google.com/maps/search/{quote_plus(query)}"
     page.goto(url, wait_until="domcontentloaded", timeout=45000)
     accept_consent(page)
-    page.wait_for_timeout(2500)
+    wait_for_content(page, SEARCH_CONTENT_SELECTORS, max_wait_ms=CONTENT_MAX_WAIT_MS)
 
 
 def open_search_at(page: Any, query: str, *, lat: float, lng: float, zoom: int) -> None:
     url = f"https://www.google.com/maps/search/{quote_plus(query)}/@{lat:.6f},{lng:.6f},{zoom}z"
     page.goto(url, wait_until="domcontentloaded", timeout=45000)
     accept_consent(page)
-    page.wait_for_timeout(2500)
+    wait_for_content(page, SEARCH_CONTENT_SELECTORS, max_wait_ms=CONTENT_MAX_WAIT_MS)
 
 
 def wait_for_search_results_to_settle(page: Any, known_count: int) -> None:
@@ -142,7 +148,7 @@ def scrape_place(
     fallback_name: str = "",
     rank: int = 1,
 ) -> PlaceProfile:
-    page = context.new_page()
+    page = open_page(context)
     place = PlaceProfile(
         rank=rank,
         name=normalize_text(fallback_name),
@@ -152,7 +158,7 @@ def scrape_place(
     try:
         page.goto(place_url, wait_until="domcontentloaded", timeout=40000)
         accept_consent(page)
-        page.wait_for_timeout(2500)
+        wait_for_content(page, PLACE_CONTENT_SELECTORS, max_wait_ms=CONTENT_MAX_WAIT_MS)
         maps_url = resolve_maps_place_url(page, place_url)
         lat, lng = extract_lat_lng(maps_url)
         place.name = first_text(page, ("h1.DUwDvf", "h1")) or place.name
@@ -206,7 +212,7 @@ def search_and_match_place(
     delay_range: tuple[float, float] = (0.8, 1.6),
 ) -> PlaceProfile | None:
     query = f"{business.name} {outlet.address or ''}".strip()
-    page = context.new_page()
+    page = open_page(context)
     try:
         open_search(page, query)
         links = collect_place_links(page, max_candidates)

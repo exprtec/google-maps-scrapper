@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import math
 import re
 from collections.abc import Callable
 from typing import Any, Protocol
+
+from playwright.sync_api import Error as PlaywrightError
 
 from gmbscraper.models import MapsSearchLink, MapsView, SearchWindow
 
@@ -14,7 +17,9 @@ MAX_ADAPTIVE_WINDOWS = 220
 MAX_SPLIT_ZOOM = 17
 MAP_VIEWPORT_WIDTH = 1366
 MAP_VIEWPORT_HEIGHT = 900
-FALLBACK_SEARCH_ZOOM = 12
+# Roughly a town plus its surroundings; Google often zooms seed results out to a region.
+LOCAL_SEARCH_ZOOM = 12
+PIN_PATTERN = re.compile(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)")
 
 
 class SearchScraper(Protocol):
@@ -32,6 +37,7 @@ def collect_links_for_geo(
     query: str,
     latitude: float | None = None,
     longitude: float | None = None,
+    zoom: int | None = None,
     log: Callable[[str], None] | None = None,
 ) -> list[MapsSearchLink]:
     """Search a query and, if results saturate Google's ~120 cap, recursively
@@ -46,15 +52,19 @@ def collect_links_for_geo(
     if len(seed_links) < SATURATED_RESULT_COUNT:
         return links
 
-    root_view = seed_view
-    if root_view is None and latitude is not None and longitude is not None:
-        root_view = MapsView(lat=latitude, lng=longitude, zoom=FALLBACK_SEARCH_ZOOM)
+    root_view = _root_view(seed_view, latitude=latitude, longitude=longitude, zoom=zoom)
     if root_view is None:
         if log:
             log("missing search bounds; seed query only")
         return links
 
     max_depth = _max_adaptive_depth(root_view.zoom)
+    if log:
+        seed_zoom = f"z{seed_view.zoom}" if seed_view else "none"
+        log(
+            f"seed saturated; splitting z{root_view.zoom} around "
+            f"{root_view.lat:.4f},{root_view.lng:.4f} (seed view {seed_zoom}, max depth {max_depth})"
+        )
     queue: list[tuple[int, SearchWindow]] = [
         (1, window)
         for window in _split_window(
@@ -67,6 +77,7 @@ def collect_links_for_geo(
         depth, window = queue.pop(0)
         searched += 1
         page = scraper.new_page()
+        # A window that fails to load is skipped rather than losing the whole search.
         try:
             scraper.open_search_at(
                 page,
@@ -76,6 +87,10 @@ def collect_links_for_geo(
                 zoom=window.zoom,
             )
             window_links = scraper.collect_place_links(page, GOOGLE_MAPS_QUERY_RESULT_LIMIT)
+        except PlaywrightError as exc:
+            if log:
+                log(f"adaptive d{depth} z{window.zoom} {window.label} skipped: {exc}")
+            continue
         finally:
             page.close()
         added = _add_unique_links(links, seen, window_links, keep_search_rank=False)
@@ -89,6 +104,38 @@ def collect_links_for_geo(
                 (depth + 1, child) for child in _split_window(window, next_zoom=window.zoom + 1)
             )
     return links
+
+
+def locate_area(scraper: SearchScraper, query: str) -> MapsView | None:
+    """Resolve a place name to its map pin and the zoom Google frames it at."""
+    page = scraper.new_page()
+    try:
+        scraper.open_search(page, query)
+        with contextlib.suppress(Exception):
+            page.wait_for_url(PIN_PATTERN, timeout=10000)
+        pin = PIN_PATTERN.search(page.url)
+        view = _parse_maps_view(page.url)
+    finally:
+        page.close()
+    if pin is None or view is None:
+        return None
+    return MapsView(lat=float(pin.group(1)), lng=float(pin.group(2)), zoom=view.zoom)
+
+
+def _root_view(
+    seed_view: MapsView | None,
+    *,
+    latitude: float | None,
+    longitude: float | None,
+    zoom: int | None,
+) -> MapsView | None:
+    """Split around the caller's location, never wider than its area or the seed view."""
+    if latitude is None or longitude is None:
+        return seed_view
+    area_zoom = zoom or LOCAL_SEARCH_ZOOM
+    if seed_view is not None:
+        area_zoom = max(area_zoom, seed_view.zoom)
+    return MapsView(lat=latitude, lng=longitude, zoom=area_zoom)
 
 
 def _max_adaptive_depth(root_zoom: int) -> int:

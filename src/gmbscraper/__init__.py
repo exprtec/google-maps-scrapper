@@ -3,7 +3,7 @@
 from gmbscraper._matching import has_match_key, is_definitive_match, match_place, pick_best_match
 from gmbscraper._parallel import chunk_items, run_chunked
 from gmbscraper._reviews import GoogleReviewsUnavailableError, scrape_reviews
-from gmbscraper._scraper import GoogleMapsScraper, google_maps_browser
+from gmbscraper._scraper import BrowserStalledError, GoogleMapsScraper, google_maps_browser
 from gmbscraper._version import __version__
 from gmbscraper.models import (
     BusinessIdentity,
@@ -17,6 +17,7 @@ from gmbscraper.models import (
 from gmbscraper.parsing import normalize_text
 
 __all__ = [
+    "BrowserStalledError",
     "BusinessIdentity",
     "GoogleMapsScraper",
     "GoogleReviewsUnavailableError",
