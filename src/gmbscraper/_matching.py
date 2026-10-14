@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from gmbscraper.models import BusinessIdentity, OutletIdentity, PlaceProfile
-from gmbscraper.parsing import normalize_domain, normalize_name, normalize_phone
+from gmbscraper.parsing import (
+    normalize_domain,
+    normalize_name,
+    normalize_phone,
+    normalize_strict_name,
+)
 
 _REASON_RANK = {
     "phone_and_domain_match": 0,
@@ -31,9 +36,11 @@ def match_place(
     place_phone = normalize_phone(place.phone)
     business_domain = normalize_domain(business.website)
     place_domain = normalize_domain(place.website)
-    place_name = normalize_name(place.name)
-    business_name = normalize_name(business.name)
-    outlet_name = normalize_name(outlet.name)
+    # Names are compared strictly: dropping generic words such as "care" made
+    # "Connect Care Australia" and "Care Connect" both reduce to "connect".
+    place_name = normalize_strict_name(place.name)
+    business_name = normalize_strict_name(business.name)
+    outlet_name = normalize_strict_name(outlet.name)
     phone_match = bool(outlet_phone and place_phone and outlet_phone == place_phone)
     domain_match = bool(business_domain and place_domain and business_domain == place_domain)
     exact_name_match = bool(place_name and place_name in {business_name, outlet_name})

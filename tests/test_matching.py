@@ -31,6 +31,20 @@ def test_match_place_falls_back_to_exact_name() -> None:
     assert matched.match_reason == "exact_name_match"
 
 
+def test_match_place_rejects_names_that_only_share_generic_words() -> None:
+    outlet = OutletIdentity(name="Connect Care Australia Pty Ltd", phone="0406 941 117")
+    business = BusinessIdentity(name="Connect Care Australia Pty Ltd", website="connectcare.com.au")
+    place = PlaceProfile(
+        name="Care Connect", phone="1800 692 464", website="https://careconnect.org.au/"
+    )
+    assert match_place(place, outlet, business) is None
+
+    place = PlaceProfile(name="Connect Care", phone="", website="")
+    matched = match_place(place, outlet, business)
+    assert matched is not None
+    assert matched.match_reason == "exact_name_match"
+
+
 def test_match_place_returns_none_without_any_signal() -> None:
     outlet = OutletIdentity(name="Acme Plumbing", phone="0400 123 456")
     business = BusinessIdentity(name="Acme Plumbing")
