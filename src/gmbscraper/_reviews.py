@@ -152,6 +152,10 @@ EXTRACT_REVIEWS_JS = """() => {
 }"""
 
 
+# Scrolls that load no new review before the pane counts as fully read.
+IDLE_SCROLL_ROUNDS = 6
+
+
 class GoogleReviewsUnavailableError(RuntimeError):
     pass
 
@@ -213,7 +217,10 @@ def scrape_reviews_on_page(
 
     seen: dict[str, MapsReview] = {}
     reached_known = False
+    # Rounds in a row that found no new review; growth is measured across a
+    # scroll, from one read of the pane to the next.
     idle_rounds = 0
+    read_count = 0
     max_scrolls = 80 if max_reviews is None else max(10, min(80, max_reviews // 2 + 8))
     for _ in range(1, max_scrolls + 1):
         for review in read_visible_reviews(page, limit=max_reviews):
@@ -229,15 +236,12 @@ def scrape_reviews_on_page(
             reached_known = reached_known or external_id in known_ids
         if reached_known or (max_reviews is not None and len(seen) >= max_reviews):
             break
-        before = len(seen)
+        idle_rounds = idle_rounds + 1 if len(seen) == read_count else 0
+        read_count = len(seen)
+        if idle_rounds >= IDLE_SCROLL_ROUNDS:
+            break
         if not scroll_reviews_pane(page):
             idle_rounds += 1
-        else:
-            idle_rounds = 0
-        if len(seen) == before:
-            idle_rounds += 1
-        if idle_rounds >= 6:
-            break
         time.sleep(0.5)
 
     if not seen:
