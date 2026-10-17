@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import time
+from collections.abc import Collection
 from typing import Any
 
 from gmbscraper._page import (
@@ -155,6 +156,10 @@ class GoogleReviewsUnavailableError(RuntimeError):
     pass
 
 
+class GoogleLimitedViewError(GoogleReviewsUnavailableError):
+    """Google served its signed-out limited view, which has no reviews tab."""
+
+
 def parse_review_rows(
     raw_items: list[dict[str, Any]], *, limit: int | None = None
 ) -> list[MapsReview]:
@@ -183,16 +188,20 @@ def read_visible_reviews(page: Any, *, limit: int | None = None) -> list[MapsRev
 
 
 def scrape_reviews_on_page(
-    page: Any, maps_url: str, *, max_reviews: int | None = None
+    page: Any,
+    maps_url: str,
+    *,
+    max_reviews: int | None = None,
+    known_ids: Collection[str] = (),
 ) -> list[MapsReview]:
+    """Scrape reviews newest first. Scrolling stops at the first review whose
+    resolved external id is in `known_ids`, since everything older is already stored."""
     if max_reviews is not None and max_reviews <= 0:
         return []
 
     navigate_to_place(page, maps_url)
     if is_limited_maps_view(page):
-        raise GoogleReviewsUnavailableError(
-            "Google Maps is showing a limited view — reviews unavailable"
-        )
+        raise GoogleLimitedViewError("Google Maps is showing a limited view — reviews unavailable")
     if not click_reviews_tab(page):
         raise GoogleReviewsUnavailableError("Could not open the Google Maps reviews tab")
 
@@ -203,6 +212,7 @@ def scrape_reviews_on_page(
     page.wait_for_timeout(1500)
 
     seen: dict[str, MapsReview] = {}
+    reached_known = False
     idle_rounds = 0
     max_scrolls = 80 if max_reviews is None else max(10, min(80, max_reviews // 2 + 8))
     for _ in range(1, max_scrolls + 1):
@@ -216,7 +226,8 @@ def scrape_reviews_on_page(
                 date_text=review.date_text,
                 date=review.date,
             )
-        if max_reviews is not None and len(seen) >= max_reviews:
+            reached_known = reached_known or external_id in known_ids
+        if reached_known or (max_reviews is not None and len(seen) >= max_reviews):
             break
         before = len(seen)
         if not scroll_reviews_pane(page):
@@ -239,6 +250,7 @@ def scrape_reviews(
     maps_url: str,
     *,
     max_reviews: int | None = None,
+    known_ids: Collection[str] = (),
     page: Any = None,
     context: Any = None,
     headless: bool = True,
@@ -249,15 +261,17 @@ def scrape_reviews(
     otherwise a throwaway Playwright browser is launched for the call.
     """
     if page is not None:
-        return scrape_reviews_on_page(page, maps_url, max_reviews=max_reviews)
+        return scrape_reviews_on_page(page, maps_url, max_reviews=max_reviews, known_ids=known_ids)
     if context is not None:
         owned_page = open_page(context)
         try:
-            return scrape_reviews_on_page(owned_page, maps_url, max_reviews=max_reviews)
+            return scrape_reviews_on_page(
+                owned_page, maps_url, max_reviews=max_reviews, known_ids=known_ids
+            )
         finally:
             owned_page.close()
 
     from gmbscraper._scraper import google_maps_browser
 
     with google_maps_browser(headless=headless) as scraper:
-        return scraper.scrape_reviews(maps_url, max_reviews=max_reviews)
+        return scraper.scrape_reviews(maps_url, max_reviews=max_reviews, known_ids=known_ids)

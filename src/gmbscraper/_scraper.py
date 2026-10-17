@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import random
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager, suppress
 from typing import Any
 from uuid import uuid4
@@ -33,10 +34,14 @@ STEALTH_ARGS = ("--disable-blink-features=AutomationControlled",)
 # Skips decoding images, including inline ones that URL blocking can't catch.
 LIGHTWEIGHT_ARGS = ("--blink-settings=imagesEnabled=false",)
 STEALTH_INIT_SCRIPT = "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+# Each launch picks a desktop platform and a Chrome major at or just behind the
+# bundled Chromium, so the claimed version never runs ahead of the real engine.
+USER_AGENT_PLATFORMS = (
+    "Windows NT 10.0; Win64; x64",
+    "Macintosh; Intel Mac OS X 10_15_7",
+    "X11; Linux x86_64",
 )
+USER_AGENT_VERSION_SPREAD = 2
 DEFAULT_VIEWPORT = {"width": 1366, "height": 900}
 BROWSER_MARKER_ENV = "GMBSCRAPER_BROWSER"
 
@@ -128,11 +133,15 @@ class GoogleMapsScraper:
         with self._step():
             return locate_area(self, query)
 
-    def scrape_reviews(self, maps_url: str, *, max_reviews: int | None = None) -> list[MapsReview]:
+    def scrape_reviews(
+        self, maps_url: str, *, max_reviews: int | None = None, known_ids: Collection[str] = ()
+    ) -> list[MapsReview]:
         with self._step():
             page = self.new_page()
             try:
-                return scrape_reviews_on_page(page, maps_url, max_reviews=max_reviews)
+                return scrape_reviews_on_page(
+                    page, maps_url, max_reviews=max_reviews, known_ids=known_ids
+                )
             finally:
                 page.close()
 
@@ -140,7 +149,9 @@ class GoogleMapsScraper:
 class _Browser:
     """One Chromium launch whose processes any thread can kill."""
 
-    def __init__(self, playwright: Any, *, headless: bool, locale: str) -> None:
+    def __init__(
+        self, playwright: Any, *, headless: bool, locale: str, user_agent: str | None
+    ) -> None:
         self._marker = uuid4().hex
         self._browser = playwright.chromium.launch(
             headless=headless,
@@ -150,7 +161,7 @@ class _Browser:
         self.context = self._browser.new_context(
             locale=locale,
             viewport=DEFAULT_VIEWPORT,
-            user_agent=DEFAULT_USER_AGENT,
+            user_agent=user_agent or random_user_agent(self._browser.version),
         )
         self.context.add_init_script(STEALTH_INIT_SCRIPT)
 
@@ -223,21 +234,36 @@ class _StallGuardedScraper(GoogleMapsScraper):
                 self._browser.kill()
 
 
+def random_user_agent(browser_version: str) -> str:
+    """A desktop Chrome user agent for a Chromium build such as "141.0.7390.37"."""
+    major = int(browser_version.split(".")[0]) - random.randint(0, USER_AGENT_VERSION_SPREAD)
+    platform = random.choice(USER_AGENT_PLATFORMS)
+    return (
+        f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 "
+        f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+    )
+
+
 @contextmanager
 def google_maps_browser(
-    *, headless: bool = True, locale: str = "en-AU", stall_timeout: float | None = None
+    *,
+    headless: bool = True,
+    locale: str = "en-AU",
+    stall_timeout: float | None = None,
+    user_agent: str | None = None,
 ) -> Iterator[GoogleMapsScraper]:
     """Open a Google Maps scraper.
 
     With `stall_timeout`, a call that makes no progress for that many seconds has
     its browser killed and raises `BrowserStalledError`; the next call relaunches it.
+    Without `user_agent`, every browser launch, relaunches included, gets a random one.
     """
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as playwright:
 
         def launch() -> _Browser:
-            return _Browser(playwright, headless=headless, locale=locale)
+            return _Browser(playwright, headless=headless, locale=locale, user_agent=user_agent)
 
         if stall_timeout is None:
             browser = launch()

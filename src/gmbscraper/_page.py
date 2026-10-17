@@ -4,13 +4,10 @@ import contextlib
 import re
 import time
 from typing import Any
-from urllib.parse import quote
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from gmbscraper.parsing import (
-    extract_lat_lng,
-    extract_place_name_from_url,
     normalize_text,
     parse_review_count_label,
 )
@@ -216,46 +213,12 @@ def score_reviews_tab(aria_label: str, tab_text: str, tab_index: str) -> float:
     return score
 
 
-def has_reviews_tab(page: Any) -> bool:
-    try:
-        tabs = page.locator('[role="tab"]').all()
-        for tab in tabs[:12]:
-            aria_label = tab.get_attribute("aria-label") or ""
-            tab_text = normalize_text(tab.inner_text(timeout=500))
-            tab_index = tab.get_attribute("data-tab-index") or ""
-            if score_reviews_tab(aria_label, tab_text, tab_index) >= 1.5:
-                return True
-    except Exception:
-        pass
-    return page.locator("div[data-review-id]").count() > 0
-
-
 def navigate_to_place(page: Any, maps_url: str) -> None:
-    try:
-        page.goto("https://www.google.com", wait_until="domcontentloaded", timeout=30000)
-        accept_consent(page)
-        page.wait_for_timeout(1500)
-    except Exception:
-        pass
-
-    place_name = extract_place_name_from_url(maps_url)
-    lat, lng = extract_lat_lng(maps_url)
-    if place_name:
-        if lat is not None and lng is not None:
-            search_url = f"https://www.google.com/maps/search/{quote(place_name)}/@{lat},{lng},17z"
-        else:
-            search_url = f"https://www.google.com/maps/search/{quote(place_name)}/"
-        page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
-        accept_consent(page)
-        page.wait_for_timeout(4000)
-        if has_reviews_tab(page):
-            return
-        if page.locator("div[data-review-id]").count() > 0:
-            return
-
+    """Open a place URL in one page load. Every extra load costs request budget
+    that Google throttles per session, so there is no warm-up or search detour."""
     page.goto(maps_url, wait_until="domcontentloaded", timeout=45000)
     accept_consent(page)
-    page.wait_for_timeout(2500)
+    wait_for_content(page, ('[role="tab"]', "h1"), max_wait_ms=8000)
 
 
 def verify_reviews_panel(page: Any) -> bool:
