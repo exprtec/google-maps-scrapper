@@ -11,11 +11,14 @@ Playwright-based scraper for Google Maps / Google Business Profile data. No offi
 
 * Not on PyPI yet. Add it as a path (or git) dependency; see [Installing In A Consuming Project](#installing-in-a-consuming-project) below.
 * Everything flows through one object: `with google_maps_browser() as scraper:` yields a `GoogleMapsScraper`. Open one per thread if you fan out — see [Parallel Fan-out](references/parallel-fanout.md).
-* Search: `scraper.search_places_adaptive(query, latitude=.., longitude=..)` → `list[MapsSearchLink]`. Handles Google's ~120-results-per-query cap by splitting the map viewport automatically; safe to use even when you don't expect a saturated result set.
+* Search: `scraper.search_places_adaptive(query, latitude=.., longitude=..)` → `list[MapsSearchLink]`. Handles Google's ~120-results-per-query cap by splitting the map viewport automatically; safe to use even when you don't expect a saturated result set. Pass the location's coordinates and zoom (from `scraper.locate("Amberley, NZ")` → `MapsView`, or zoom 12 by default): splitting then stays within that area instead of the (often region-wide) view Google picked for the seed query.
 * Place detail: `scraper.scrape_place(url, fallback_name=.., rank=..)` → `PlaceProfile`. Never raises — a selector miss just leaves that field blank, so check for empty strings, not exceptions.
 * Identity matching: `scraper.search_and_match(outlet, business)` → `PlaceProfile | None`, scored by phone/domain/name confidence. See [Matching](references/matching.md) before hand-rolling any similarity check.
-* Reviews: `scraper.scrape_reviews(maps_url)` → `list[MapsReview]`. Unlimited by default (`max_reviews=None`) — this is the one call that raises: `GoogleReviewsUnavailableError` when there's no reviews UI to open at all (blocked/limited view, or truly zero reviews).
+* Reviews: `scraper.scrape_reviews(maps_url)` → `list[MapsReview]`. Unlimited by default (`max_reviews=None`) — this is the one call that raises: `GoogleReviewsUnavailableError` when there's no reviews UI to open at all (blocked/limited view, or truly zero reviews); the limited view raises the `GoogleLimitedViewError` subclass. Pass `known_ids=` (resolved external ids you already store) on re-syncs: scrolling stops at the first known review.
 * Pass `locale=` to `google_maps_browser` matching the business's country (`"en-AU"`, `"en-NZ"`, ...) — it changes the address/phone formatting Google renders, which downstream parsing assumes.
+* Every browser launch gets a random desktop Chrome user agent; pass `user_agent=` to `google_maps_browser` to pin one.
+* Long-running jobs should pass `stall_timeout=` (seconds) to `google_maps_browser`: a call that stops making progress gets its browser killed and raises `BrowserStalledError`, and the next call relaunches the browser.
+* Pages skip map tiles, photos and fonts (and the launched browser skips images), which halves Chromium's CPU. Don't scrape anything that needs them rendered.
 * No retry/backoff/proxy rotation is built in. This is a DOM scraper, not an anti-block service — see [Limits](#limits).
 * Package development (tests, lint, versioning): see [Development](references/development.md).
 

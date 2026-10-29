@@ -25,10 +25,39 @@ def test_match_place_phone_and_domain_outranks_name() -> None:
 def test_match_place_falls_back_to_exact_name() -> None:
     outlet = OutletIdentity(name="Acme Plumbing")
     business = BusinessIdentity(name="Acme Plumbing")
-    place = PlaceProfile(name="Acme Plumbing", phone="", website="")
+    place = PlaceProfile(name="Acme Plumbing", phone="", website="", address="1 Main St")
     matched = match_place(place, outlet, business)
     assert matched is not None
     assert matched.match_reason == "exact_name_match"
+
+
+def test_match_place_name_match_needs_no_conflicting_website() -> None:
+    outlet = OutletIdentity(name="Connect Care Australia Pty Ltd", phone="0406 941 117")
+    business = BusinessIdentity(name="Connect Care Australia Pty Ltd", website="connectcare.com.au")
+    place = PlaceProfile(
+        name="Care Connect",
+        phone="1800 692 464",
+        website="https://careconnect.org.au/",
+        address="14 Lexington Dr, Bella Vista NSW 2153",
+    )
+    assert match_place(place, outlet, business) is None
+
+    place.website = "https://connectcare.net.au/"
+    assert match_place(place, outlet, business) is not None
+
+    place.website = ""
+    matched = match_place(place, outlet, business)
+    assert matched is not None
+    assert matched.match_reason == "exact_name_match"
+
+
+def test_match_place_name_match_skips_suburbs() -> None:
+    outlet = OutletIdentity(name="Rosebery Clinic", address="Rosebery, NSW, 2018")
+    business = BusinessIdentity(name="Lifehackers Institute")
+    assert match_place(PlaceProfile(name="Rosebery"), outlet, business) is None
+
+    place = PlaceProfile(name="Rosebery", phone="0400 000 000", address="Rosebery NSW 2018")
+    assert match_place(place, outlet, business) is None
 
 
 def test_match_place_returns_none_without_any_signal() -> None:

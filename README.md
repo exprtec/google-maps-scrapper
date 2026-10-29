@@ -51,8 +51,10 @@ with google_maps_browser() as maps:
     if match:
         print(match.match_reason, match.place_id)
 
-    # Scrape reviews
+    # Scrape reviews; on a re-sync, pass the ids you already store to stop
+    # scrolling at the first known review
     reviews = maps.scrape_reviews(place.maps_url, max_reviews=50)
+    newer = maps.scrape_reviews(place.maps_url, known_ids={r.external_id for r in reviews})
 ```
 
 ## Design notes
@@ -64,6 +66,17 @@ with google_maps_browser() as maps:
   it raises `GoogleReviewsUnavailableError` when Google serves a page with no
   reviews UI at all (throttled/limited view, or the reviews tab never opens),
   since a caller needs to distinguish "zero reviews" from "couldn't scrape."
+  Its `GoogleLimitedViewError` subclass marks Google's signed-out limited
+  view when no reviews could be read at all.
+- Signed-out Google Maps now usually serves a "limited view" whose reviews tab
+  stops after a few reviews behind a sign-in prompt. When `scrape_reviews` sees
+  it, it reads the place's name and feature id from Maps and opens the
+  "N Google reviews" panel from a Google Search for that name instead, which
+  lists every review. Only the panel whose link carries the same feature id is
+  used, so a similarly named business is never scraped by mistake. If Search
+  can't show the panel, it falls back to whatever the Maps tab shows.
+- Each place opens in a single page load, and each browser launch gets a
+  random desktop Chrome user agent unless you pass `user_agent=`.
 - There's no retry/backoff or proxy rotation built in. This is a DOM scraper,
   not a hosted anti-block service — for scraping at a scale where blocking is
   routine, a paid API (Outscraper, SerpApi, etc.) will be cheaper than

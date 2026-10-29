@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import re
+import time
 from typing import Any
-from urllib.parse import quote
+
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from gmbscraper.parsing import (
-    extract_lat_lng,
-    extract_place_name_from_url,
     normalize_text,
     parse_review_count_label,
 )
@@ -18,6 +18,17 @@ LIMITED_VIEW_PHRASES = (
     "eingeschränkte ansicht",
     "vista limitada",
     "vista limitata",
+)
+
+# Map tiles, photos and fonts are most of Chromium's CPU; scraping only reads text.
+BLOCKED_URLS = (
+    "*/maps/vt*",
+    "*/vt/icon*",
+    "*fonts.gstatic.com/*",
+    "*googleusercontent.com/*",
+    "*streetviewpixels-pa.googleapis.com/*",
+    "*maps.gstatic.com/*",
+    "*/images/branding/*",
 )
 
 REVIEW_TAB_WORDS = frozenset(
@@ -70,6 +81,28 @@ REVIEWS_TAB_SELECTORS = (
     'button[role="tab"]',
     'div[role="tab"]',
 )
+
+
+def open_page(context: Any) -> Any:
+    """Open a Chromium page that skips downloading map tiles, photos and fonts."""
+    page = context.new_page()
+    session = context.new_cdp_session(page)
+    session.send("Network.enable")
+    session.send("Network.setBlockedURLs", {"urls": list(BLOCKED_URLS)})
+    return page
+
+
+def wait_for_content(page: Any, selectors: tuple[str, ...], *, max_wait_ms: int) -> None:
+    """Wait until each selector renders, sharing one `max_wait_ms` budget across them all."""
+    deadline = time.monotonic() + max_wait_ms / 1000
+    for selector in selectors:
+        remaining_ms = (deadline - time.monotonic()) * 1000
+        if remaining_ms <= 0:
+            return
+        try:
+            page.wait_for_selector(selector, timeout=remaining_ms)
+        except PlaywrightTimeoutError:
+            return
 
 
 def accept_consent(page: Any) -> None:
@@ -180,46 +213,12 @@ def score_reviews_tab(aria_label: str, tab_text: str, tab_index: str) -> float:
     return score
 
 
-def has_reviews_tab(page: Any) -> bool:
-    try:
-        tabs = page.locator('[role="tab"]').all()
-        for tab in tabs[:12]:
-            aria_label = tab.get_attribute("aria-label") or ""
-            tab_text = normalize_text(tab.inner_text(timeout=500))
-            tab_index = tab.get_attribute("data-tab-index") or ""
-            if score_reviews_tab(aria_label, tab_text, tab_index) >= 1.5:
-                return True
-    except Exception:
-        pass
-    return page.locator("div[data-review-id]").count() > 0
-
-
 def navigate_to_place(page: Any, maps_url: str) -> None:
-    try:
-        page.goto("https://www.google.com", wait_until="domcontentloaded", timeout=30000)
-        accept_consent(page)
-        page.wait_for_timeout(1500)
-    except Exception:
-        pass
-
-    place_name = extract_place_name_from_url(maps_url)
-    lat, lng = extract_lat_lng(maps_url)
-    if place_name:
-        if lat is not None and lng is not None:
-            search_url = f"https://www.google.com/maps/search/{quote(place_name)}/@{lat},{lng},17z"
-        else:
-            search_url = f"https://www.google.com/maps/search/{quote(place_name)}/"
-        page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
-        accept_consent(page)
-        page.wait_for_timeout(4000)
-        if has_reviews_tab(page):
-            return
-        if page.locator("div[data-review-id]").count() > 0:
-            return
-
+    """Open a place URL in one page load. Every extra load costs request budget
+    that Google throttles per session, so there is no warm-up or search detour."""
     page.goto(maps_url, wait_until="domcontentloaded", timeout=45000)
     accept_consent(page)
-    page.wait_for_timeout(2500)
+    wait_for_content(page, ('[role="tab"]', "h1"), max_wait_ms=8000)
 
 
 def verify_reviews_panel(page: Any) -> bool:
