@@ -8,14 +8,16 @@ from typing import Any
 from gmbscraper._page import (
     click_reviews_tab,
     evaluate_json,
+    first_text,
     is_limited_maps_view,
     navigate_to_place,
     open_page,
     scroll_reviews_pane,
     set_reviews_sort,
 )
+from gmbscraper._search_reviews import place_feature_id, scrape_search_reviews_on_page
 from gmbscraper.models import MapsReview
-from gmbscraper.parsing import normalize_text, parse_relative_date
+from gmbscraper.parsing import extract_place_name_from_url, normalize_text, parse_relative_date
 
 EXTRACT_REVIEWS_JS = """() => {
     function extractUsername(card) {
@@ -205,8 +207,24 @@ def scrape_reviews_on_page(
 
     navigate_to_place(page, maps_url)
     if is_limited_maps_view(page):
-        raise GoogleLimitedViewError("Google Maps is showing a limited view — reviews unavailable")
+        # Signed-out Maps now caps the reviews tab at a few reviews behind a
+        # sign-in prompt; Search's review panel for the same place lists them all.
+        name = first_text(page, ("h1",)) or extract_place_name_from_url(page.url)
+        found = scrape_search_reviews_on_page(
+            page,
+            name=name,
+            feature_id=place_feature_id(page.url),
+            max_reviews=max_reviews,
+            known_ids=known_ids,
+        )
+        if found:
+            return found
+        navigate_to_place(page, maps_url)
     if not click_reviews_tab(page):
+        if is_limited_maps_view(page):
+            raise GoogleLimitedViewError(
+                "Google Maps is showing a limited view — reviews unavailable"
+            )
         raise GoogleReviewsUnavailableError("Could not open the Google Maps reviews tab")
 
     set_reviews_sort(page, label="Newest")

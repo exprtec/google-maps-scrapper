@@ -67,7 +67,14 @@ with google_maps_browser() as maps:
   reviews UI at all (throttled/limited view, or the reviews tab never opens),
   since a caller needs to distinguish "zero reviews" from "couldn't scrape."
   Its `GoogleLimitedViewError` subclass marks Google's signed-out limited
-  view, which signals throttling rather than a problem with one place.
+  view when no reviews could be read at all.
+- Signed-out Google Maps now usually serves a "limited view" whose reviews tab
+  stops after a few reviews behind a sign-in prompt. When `scrape_reviews` sees
+  it, it reads the place's name and feature id from Maps and opens the
+  "N Google reviews" panel from a Google Search for that name instead, which
+  lists every review. Only the panel whose link carries the same feature id is
+  used, so a similarly named business is never scraped by mistake. If Search
+  can't show the panel, it falls back to whatever the Maps tab shows.
 - Each place opens in a single page load, and each browser launch gets a
   random desktop Chrome user agent unless you pass `user_agent=`.
 - There's no retry/backoff or proxy rotation built in. This is a DOM scraper,
