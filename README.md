@@ -8,7 +8,8 @@ parallel fan-out helpers.
   website, rating, review count) without the official (paid, rate-limited)
   Places API.
 - Adaptive quadrant search that recursively splits the map viewport to pull
-  results beyond Google's ~120-per-query cap.
+  results beyond Google's ~120-per-query cap, while a split keeps finding new
+  places.
 - Confidence-tiered identity matching (`phone_and_domain_match` >
   `phone_match` > `domain_match` > `exact_name_match`) for matching a known
   business/outlet against scraped candidates.

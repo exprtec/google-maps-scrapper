@@ -13,6 +13,8 @@ from gmbscraper.models import MapsSearchLink, MapsView, SearchWindow
 GOOGLE_MAPS_QUERY_RESULT_LIMIT = 120
 SATURATED_RESULT_COUNT = 110
 MAX_ADAPTIVE_DEPTH = 3
+# A full window adding fewer new places than this mostly repeats its neighbours; so would its quadrants.
+MIN_NEW_LINKS_TO_SPLIT = 10
 MAX_ADAPTIVE_WINDOWS = 220
 MAX_SPLIT_ZOOM = 17
 MAP_VIEWPORT_WIDTH = 1366
@@ -99,7 +101,9 @@ def collect_links_for_geo(
                 f"adaptive d{depth} z{window.zoom} {window.label} "
                 f"found={len(window_links)} new={added} total={len(links)}"
             )
-        if _should_split_window(window_links, depth=depth, zoom=window.zoom, max_depth=max_depth):
+        if _should_split_window(
+            window_links, added=added, depth=depth, zoom=window.zoom, max_depth=max_depth
+        ):
             queue.extend(
                 (depth + 1, child) for child in _split_window(window, next_zoom=window.zoom + 1)
             )
@@ -146,11 +150,12 @@ def _max_adaptive_depth(root_zoom: int) -> int:
 def _should_split_window(
     window_links: list[tuple[str, str]],
     *,
+    added: int,
     depth: int,
     zoom: int,
     max_depth: int,
 ) -> bool:
-    if len(window_links) < SATURATED_RESULT_COUNT:
+    if len(window_links) < SATURATED_RESULT_COUNT or added < MIN_NEW_LINKS_TO_SPLIT:
         return False
     if depth >= max_depth:
         return False
